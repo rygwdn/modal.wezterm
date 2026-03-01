@@ -80,10 +80,49 @@ local function get_mode_status_text(left_seperator, bg, fg)
 	})
 end
 
-return {
-	get_mode_status_text = get_mode_status_text,
-	get_hint_status_text = get_hint_status_text,
-	key_table = {
+-- Probe whether the token motion actions are available in this wezterm build.
+local has_token_motions = pcall(function()
+	local _ = wezterm.action.CopyMode("MoveForwardToken")
+end)
+
+-- Activate search in a given direction, pushing the appropriate search key table
+local function activate_search(forward)
+	local table_name = forward and "search_mode_forward" or "search_mode_backward"
+	return wezterm.action_callback(function(window, pane)
+		wezterm.GLOBAL.search_mode = table_name
+		window:perform_action(
+			wezterm.action.Multiple({
+				wezterm.action.Search({ CaseSensitiveString = "" }),
+				wezterm.action.ActivateKeyTable({
+					name = table_name,
+					one_shot = false,
+					replace_current = true,
+				}),
+				wezterm.action_callback(function(w, p)
+					wezterm.emit("modal.enter", table_name, w, p)
+				end),
+			}),
+			pane
+		)
+	end)
+end
+
+-- Bracket chord tables for [/] zone navigation
+local bracket_back_table = {
+	{ key = "[", action = wezterm.action.CopyMode("MoveBackwardSemanticZone") },
+	{ key = "o", action = wezterm.action.CopyMode({ MoveBackwardZoneOfType = "Output" }) },
+	{ key = "p", action = wezterm.action.CopyMode({ MoveBackwardZoneOfType = "Prompt" }) },
+	{ key = "i", action = wezterm.action.CopyMode({ MoveBackwardZoneOfType = "Input" }) },
+}
+
+local bracket_forward_table = {
+	{ key = "]", action = wezterm.action.CopyMode("MoveForwardSemanticZone") },
+	{ key = "o", action = wezterm.action.CopyMode({ MoveForwardZoneOfType = "Output" }) },
+	{ key = "p", action = wezterm.action.CopyMode({ MoveForwardZoneOfType = "Prompt" }) },
+	{ key = "i", action = wezterm.action.CopyMode({ MoveForwardZoneOfType = "Input" }) },
+}
+
+local key_table = {
 		-- Cancel the mode by pressing escape
 		{
 			key = "Escape",
@@ -96,8 +135,9 @@ return {
 					)
 					wezterm.GLOBAL.visual_mode = nil
 				elseif wezterm.GLOBAL.search_mode then
+					local mode_name = wezterm.GLOBAL.search_mode
 					wezterm.GLOBAL.search_mode = false
-					window:perform_action(modal.exit_mode("search_mode"), pane)
+					window:perform_action(modal.exit_mode(mode_name), pane)
 					window:perform_action(modal.activate_mode("copy_mode"), pane)
 				else
 					wezterm.GLOBAL.search_mode = false
@@ -117,8 +157,9 @@ return {
 					)
 					wezterm.GLOBAL.visual_mode = nil
 				elseif wezterm.GLOBAL.search_mode then
+					local mode_name = wezterm.GLOBAL.search_mode
 					wezterm.GLOBAL.search_mode = false
-					window:perform_action(modal.exit_mode("search_mode"), pane)
+					window:perform_action(modal.exit_mode(mode_name), pane)
 					window:perform_action(modal.activate_mode("copy_mode"), pane)
 				else
 					wezterm.GLOBAL.search_mode = false
@@ -136,8 +177,12 @@ return {
 		{ key = "End", action = wezterm.action.CopyMode("MoveToEndOfLineContent") },
 		{ key = "Home", action = wezterm.action.CopyMode("MoveToStartOfLine") },
 
-		-- Move to
-		{ key = "g", action = wezterm.action.CopyMode("MoveToScrollbackTop") },
+		-- Move to scrollback positions
+		{ key = "g", action = wezterm.action.ActivateKeyTable({
+			name = "copy_mode_g_prefix",
+			one_shot = true,
+			timeout_milliseconds = 1000,
+		}) },
 		{ key = "G", mods = "SHIFT", action = wezterm.action.CopyMode("MoveToScrollbackBottom") },
 		{ key = "H", mods = "SHIFT", action = wezterm.action.CopyMode("MoveToViewportTop") },
 		{ key = "L", mods = "SHIFT", action = wezterm.action.CopyMode("MoveToViewportBottom") },
@@ -248,6 +293,7 @@ return {
 			end),
 		},
 
+		-- Semantic zone navigation
 		{
 			key = "s",
 			mods = "NONE",
@@ -259,6 +305,23 @@ return {
 			action = wezterm.action.CopyMode("MoveForwardSemanticZone"),
 		},
 
+		-- Paragraph-style jumps between shell prompts (vim { and })
+		{ key = "{", mods = "SHIFT", action = wezterm.action.CopyMode({ MoveBackwardZoneOfType = "Prompt" }) },
+		{ key = "}", mods = "SHIFT", action = wezterm.action.CopyMode({ MoveForwardZoneOfType = "Prompt" }) },
+
+		-- [ prefix: backward zone navigation chord
+		{ key = "[", action = wezterm.action.ActivateKeyTable({
+			name = "copy_mode_bracket_back",
+			one_shot = true,
+			timeout_milliseconds = 1000,
+		}) },
+		-- ] prefix: forward zone navigation chord
+		{ key = "]", action = wezterm.action.ActivateKeyTable({
+			name = "copy_mode_bracket_forward",
+			one_shot = true,
+			timeout_milliseconds = 1000,
+		}) },
+
 		-- Move by cell
 		{ key = "h", action = wezterm.action.CopyMode("MoveLeft") },
 		{ key = "j", action = wezterm.action.CopyMode("MoveDown") },
@@ -269,7 +332,7 @@ return {
 		{ key = "UpArrow", action = wezterm.action.CopyMode("MoveUp") },
 		{ key = "DownArrow", action = wezterm.action.CopyMode("MoveDown") },
 
-		-- Move by word
+		-- Move by word (Unicode UAX#29 boundaries)
 		{ key = "w", action = wezterm.action.CopyMode("MoveForwardWord") },
 		{ key = "e", action = wezterm.action.CopyMode("MoveForwardWordEnd") },
 		{ key = "b", action = wezterm.action.CopyMode("MoveBackwardWord") },
@@ -297,36 +360,19 @@ return {
 			}),
 		},
 
-		--Search binds
-		{
-			key = "/",
-			mods = "SHIFT",
-			action = wezterm.action_callback(function(window, pane)
-				if wezterm.GLOBAL.search_mode then
-					wezterm.emit("modal.enter", "search_mode", window, pane)
-					window:perform_action(wezterm.action.CopyMode("EditPattern"), pane)
-				else
-					wezterm.GLOBAL.search_mode = true
-					window:perform_action(modal.activate_mode("search_mode"), pane)
-				end
-			end),
-		},
+		-- Search: / = forward, ? (Shift+/) = backward
 		{
 			key = "/",
 			mods = "NONE",
-			action = wezterm.action_callback(function(window, pane)
-				if wezterm.GLOBAL.search_mode then
-					wezterm.emit("modal.enter", "search_mode", window, pane)
-					window:perform_action(wezterm.action.CopyMode("EditPattern"), pane)
-				else
-					wezterm.GLOBAL.search_mode = true
-					window:perform_action(modal.activate_mode("search_mode"), pane)
-				end
-			end),
+			action = activate_search(true),
 		},
+		{
+			key = "/",
+			mods = "SHIFT",
+			action = activate_search(false),
+		},
+		-- n/N respect search direction (set by which search table is active)
 		{ key = "n", mods = "NONE", action = wezterm.action.CopyMode("NextMatch") },
-		{ key = "P", mods = "SHIFT", action = wezterm.action.CopyMode("NextMatch") },
-		{ key = "p", mods = "NONE", action = wezterm.action.CopyMode("PriorMatch") },
 		{ key = "N", mods = "SHIFT", action = wezterm.action.CopyMode("PriorMatch") },
 
 		{ key = ",", mods = "NONE", action = wezterm.action.CopyMode("JumpReverse") },
@@ -344,12 +390,26 @@ return {
 
 		{
 			key = "t",
-			action = wezterm.action.CopyMode({ JumpBackward = { prev_char = true } }),
+			action = wezterm.action.CopyMode({ JumpForward = { prev_char = true } }),
 		},
 		{
 			key = "T",
 			mods = "SHIFT",
 			action = wezterm.action.CopyMode({ JumpBackward = { prev_char = true } }),
 		},
-	},
+}
+
+if has_token_motions then
+	-- W/B/E: token motions (requires custom wezterm build)
+	key_table[#key_table + 1] = { key = "W", mods = "SHIFT", action = wezterm.action.CopyMode("MoveForwardToken") }
+	key_table[#key_table + 1] = { key = "E", mods = "SHIFT", action = wezterm.action.CopyMode("MoveForwardTokenEnd") }
+	key_table[#key_table + 1] = { key = "B", mods = "SHIFT", action = wezterm.action.CopyMode("MoveBackwardToken") }
+end
+
+return {
+	get_mode_status_text = get_mode_status_text,
+	get_hint_status_text = get_hint_status_text,
+	bracket_back_table = bracket_back_table,
+	bracket_forward_table = bracket_forward_table,
+	key_table = key_table,
 }

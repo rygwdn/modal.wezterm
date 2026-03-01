@@ -11,7 +11,6 @@ local wezterm = require("wezterm")
 ---@type table<string, mode>
 local modes = {
 	copy_mode = { name = "copy_mode", key_table_name = "copy_mode", status_text = "Copy" },
-	search_mode = { name = "search_mode", key_table_name = "search_mode", status_text = "Search" },
 }
 
 -- map from key_table_name to key_table
@@ -117,13 +116,6 @@ local function activate_mode(name, activate_key_table_params)
 				wezterm.emit("modal.enter", name, window, pane)
 			end),
 		})
-	elseif name == "search_mode" then
-		return wezterm.action.Multiple({
-			wezterm.action.Search({ CaseSensitiveString = "" }),
-			wezterm.action_callback(function(window, pane)
-				wezterm.emit("modal.enter", name, window, pane)
-			end),
-		})
 	else
 		local parameters = activate_key_table_params or { one_shot = false }
 		parameters.name = name
@@ -143,14 +135,6 @@ end
 local function exit_mode(name)
 	if name == "copy_mode" then
 		return wezterm.action.Multiple({
-			wezterm.action.CopyMode("Close"),
-			wezterm.action_callback(function(window, pane)
-				wezterm.emit("modal.exit", name, window, pane)
-			end),
-		})
-	elseif name == "search_mode" then
-		return wezterm.action.Multiple({
-			wezterm.action.CopyMode("ClearPattern"),
 			wezterm.action.CopyMode("Close"),
 			wezterm.action_callback(function(window, pane)
 				wezterm.emit("modal.exit", name, window, pane)
@@ -216,13 +200,41 @@ local function apply_to_config(config)
 		require("copy_mode").get_hint_status_text(icons, colors, { bg = config.colors.ansi[4], fg = fg_status_color })
 	add_mode("copy_mode", require("copy_mode").key_table, status_text)
 
-	status_text =
-		require("search_mode").get_hint_status_text(icons, colors, { bg = config.colors.ansi[6], fg = fg_status_color })
-	add_mode("search_mode", require("search_mode").key_table, status_text)
+	local search = require("search_mode")
+
+	-- Directional search modes (/ = forward, ? = backward)
+	local search_forward_status = wezterm.format({
+		{ Attribute = { Intensity = "Bold" } },
+		{ Foreground = { Color = config.colors.ansi[6] } },
+		{ Text = icons.left_seperator },
+		{ Foreground = { Color = fg_status_color } },
+		{ Background = { Color = config.colors.ansi[6] } },
+		{ Text = "Search ↓  " },
+	})
+	local search_backward_status = wezterm.format({
+		{ Attribute = { Intensity = "Bold" } },
+		{ Foreground = { Color = config.colors.ansi[6] } },
+		{ Text = icons.left_seperator },
+		{ Foreground = { Color = fg_status_color } },
+		{ Background = { Color = config.colors.ansi[6] } },
+		{ Text = "Search ↑  " },
+	})
+	add_mode("search_mode_forward",  search.key_table_forward,  search_forward_status,  "search_mode_forward")
+	add_mode("search_mode_backward", search.key_table_backward, search_backward_status, "search_mode_backward")
 
 	status_text =
 		require("visual_mode").get_hint_status_text(icons, colors, { bg = config.colors.ansi[3], fg = fg_status_color })
 	add_mode("Visual", {}, status_text)
+
+	-- g-prefix sub-table for gg = scrollback top
+	key_tables["copy_mode_g_prefix"] = {
+		{ key = "g", action = wezterm.action.CopyMode("MoveToScrollbackTop") },
+	}
+
+	-- Bracket chord sub-tables for [/] zone navigation
+	local copy_mode = require("copy_mode")
+	key_tables["copy_mode_bracket_back"]    = copy_mode.bracket_back_table
+	key_tables["copy_mode_bracket_forward"] = copy_mode.bracket_forward_table
 
 	config.key_tables = key_tables
 end

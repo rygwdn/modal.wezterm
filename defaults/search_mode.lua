@@ -77,10 +77,28 @@ local function get_mode_status_text(left_seperator, bg, fg)
 	})
 end
 
-return {
-	get_mode_status_text = get_mode_status_text,
-	get_hint_status_text = get_hint_status_text,
-	key_table = {
+local function make_exit_search(mode_name)
+	return wezterm.action_callback(function(window, pane)
+		wezterm.GLOBAL.search_mode = false
+		window:perform_action(modal.exit_mode(mode_name), pane)
+		window:perform_action(modal.activate_mode("copy_mode"), pane)
+	end)
+end
+
+-- Build a search key table for a given direction.
+-- forward=true  -> n=NextMatch, N=PriorMatch  (/ search)
+-- forward=false -> n=PriorMatch, N=NextMatch  (? search)
+local function make_search_key_table(forward)
+	local mode_name = forward and "search_mode_forward" or "search_mode_backward"
+	local next_action = forward
+		and wezterm.action.CopyMode("NextMatch")
+		or  wezterm.action.CopyMode("PriorMatch")
+	local prev_action = forward
+		and wezterm.action.CopyMode("PriorMatch")
+		or  wezterm.action.CopyMode("NextMatch")
+	local exit_search = make_exit_search(mode_name)
+
+	return {
 		{
 			key = "Enter",
 			mods = "NONE",
@@ -91,38 +109,24 @@ return {
 				wezterm.action.CopyMode("AcceptPattern"),
 			}),
 		},
-		{
-			key = "Escape",
-			action = wezterm.action_callback(function(window, pane)
-				wezterm.GLOBAL.search_mode = false
-				window:perform_action(modal.exit_mode("search_mode"), pane)
-				window:perform_action(modal.activate_mode("copy_mode"), pane)
-			end),
-		},
-		{
-			key = "c",
-			mods = "CTRL",
-			action = wezterm.action_callback(function(window, pane)
-				wezterm.GLOBAL.search_mode = false
-				window:perform_action(modal.exit_mode("search_mode"), pane)
-				window:perform_action(modal.activate_mode("copy_mode"), pane)
-			end),
-		},
+		{ key = "Escape", action = exit_search },
+		{ key = "c", mods = "CTRL", action = exit_search },
+		{ key = "n", mods = "NONE", action = next_action },
+		{ key = "N", mods = "SHIFT", action = prev_action },
 		{ key = "n", mods = "CTRL", action = wezterm.action.CopyMode("NextMatch") },
 		{ key = "p", mods = "CTRL", action = wezterm.action.CopyMode("PriorMatch") },
 		{ key = "r", mods = "CTRL", action = wezterm.action.CopyMode("CycleMatchType") },
 		{ key = "u", mods = "CTRL", action = wezterm.action.CopyMode("ClearPattern") },
-		{
-			key = "PageUp",
-			mods = "NONE",
-			action = wezterm.action.CopyMode("PriorMatchPage"),
-		},
-		{
-			key = "PageDown",
-			mods = "NONE",
-			action = wezterm.action.CopyMode("NextMatchPage"),
-		},
-		{ key = "UpArrow", mods = "NONE", action = wezterm.action.CopyMode("PriorMatch") },
+		{ key = "PageUp",    mods = "NONE", action = wezterm.action.CopyMode("PriorMatchPage") },
+		{ key = "PageDown",  mods = "NONE", action = wezterm.action.CopyMode("NextMatchPage") },
+		{ key = "UpArrow",   mods = "NONE", action = wezterm.action.CopyMode("PriorMatch") },
 		{ key = "DownArrow", mods = "NONE", action = wezterm.action.CopyMode("NextMatch") },
-	},
+	}
+end
+
+return {
+	get_mode_status_text = get_mode_status_text,
+	get_hint_status_text = get_hint_status_text,
+	key_table_forward  = make_search_key_table(true),
+	key_table_backward = make_search_key_table(false),
 }

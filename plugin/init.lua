@@ -1,5 +1,7 @@
 local wezterm = require("wezterm")
 
+local self_url = "https://github.com/MLFlexer/modal.wezterm"
+
 -- see https://wezfurlong.org/wezterm/config/lua/keyassignment/index.html
 ---@alias KeyAssignment any
 
@@ -162,8 +164,8 @@ local function exit_all_modes(name)
 	})
 end
 
-local function apply_to_config(config)
-	enable_defaults("https://github.com/MLFlexer/modal.wezterm")
+local function apply_to_config(config, url)
+	enable_defaults(url or self_url)
 	local icons = {
 		left_seperator = wezterm.nerdfonts.ple_left_half_circle_thick,
 		key_hint_seperator = "  ",
@@ -201,26 +203,9 @@ local function apply_to_config(config)
 	add_mode("copy_mode", require("copy_mode").key_table, status_text)
 
 	local search = require("search_mode")
-
-	-- Directional search modes (/ = forward, ? = backward)
-	local search_forward_status = wezterm.format({
-		{ Attribute = { Intensity = "Bold" } },
-		{ Foreground = { Color = config.colors.ansi[6] } },
-		{ Text = icons.left_seperator },
-		{ Foreground = { Color = fg_status_color } },
-		{ Background = { Color = config.colors.ansi[6] } },
-		{ Text = "Search ↓  " },
-	})
-	local search_backward_status = wezterm.format({
-		{ Attribute = { Intensity = "Bold" } },
-		{ Foreground = { Color = config.colors.ansi[6] } },
-		{ Text = icons.left_seperator },
-		{ Foreground = { Color = fg_status_color } },
-		{ Background = { Color = config.colors.ansi[6] } },
-		{ Text = "Search ↑  " },
-	})
-	add_mode("search_mode_forward",  search.key_table_forward,  search_forward_status,  "search_mode_forward")
-	add_mode("search_mode_backward", search.key_table_backward, search_backward_status, "search_mode_backward")
+	local search_status =
+		search.get_hint_status_text(icons, colors, { bg = config.colors.ansi[6], fg = fg_status_color })
+	add_mode("search_mode", search.key_table, search_status, "search_mode")
 
 	status_text =
 		require("visual_mode").get_hint_status_text(icons, colors, { bg = config.colors.ansi[3], fg = fg_status_color })
@@ -269,6 +254,7 @@ return {
 	create_status_text = create_status_text,
 	modes = modes,
 	key_tables = key_tables,
+	self_url = self_url,
 	enable_defaults = enable_defaults,
 	apply_to_config = apply_to_config,
 	set_default_keys = set_default_keys,

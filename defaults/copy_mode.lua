@@ -1,5 +1,12 @@
 local wezterm = require("wezterm")
-local modal = wezterm.plugin.require("https://github.com/MLFlexer/modal.wezterm")
+local _self_url = "https://github.com/MLFlexer/modal.wezterm"
+for _, p in ipairs(wezterm.plugin.list()) do
+	if string.find(package.path, p.plugin_dir .. "/defaults", 1, true) then
+		_self_url = p.url
+		break
+	end
+end
+local modal = wezterm.plugin.require(_self_url)
 
 ---Create status text with hints
 ---@param hint_icons {left_seperator: string, key_hint_seperator: string, mod_seperator: string}
@@ -64,42 +71,22 @@ local function get_hint_status_text(hint_icons, hint_colors, mode_colors)
 	})
 end
 
----Create mode status text
----@param bg string
----@param fg string
----@param left_seperator string
----@return string
-local function get_mode_status_text(left_seperator, bg, fg)
-	return wezterm.format({
-		{ Attribute = { Intensity = "Bold" } },
-		{ Foreground = { Color = bg } },
-		{ Text = left_seperator },
-		{ Foreground = { Color = fg } },
-		{ Background = { Color = bg } },
-		{ Text = "Copy  " },
-	})
-end
-
 -- Probe whether the token motion actions are available in this wezterm build.
 local has_token_motions = pcall(function()
 	local _ = wezterm.action.CopyMode("MoveForwardToken")
 end)
 
--- Activate search in a given direction, pushing the appropriate search key table
+-- Activate search in a given direction.
+-- We store the direction in wezterm.GLOBAL so that n/N in copy mode
+-- can use the correct NextMatch/PriorMatch action after search ends.
 local function activate_search(forward)
-	local table_name = forward and "search_mode_forward" or "search_mode_backward"
 	return wezterm.action_callback(function(window, pane)
-		wezterm.GLOBAL.search_mode = table_name
+		wezterm.GLOBAL.search_forward = forward
 		window:perform_action(
 			wezterm.action.Multiple({
 				wezterm.action.Search({ CaseSensitiveString = "" }),
-				wezterm.action.ActivateKeyTable({
-					name = table_name,
-					one_shot = false,
-					replace_current = true,
-				}),
 				wezterm.action_callback(function(w, p)
-					wezterm.emit("modal.enter", table_name, w, p)
+					wezterm.emit("modal.enter", "search_mode", w, p)
 				end),
 			}),
 			pane
@@ -134,13 +121,9 @@ local key_table = {
 						pane
 					)
 					wezterm.GLOBAL.visual_mode = nil
-				elseif wezterm.GLOBAL.search_mode then
-					local mode_name = wezterm.GLOBAL.search_mode
-					wezterm.GLOBAL.search_mode = false
-					window:perform_action(modal.exit_mode(mode_name), pane)
-					window:perform_action(modal.activate_mode("copy_mode"), pane)
 				else
-					wezterm.GLOBAL.search_mode = false
+					wezterm.GLOBAL.search_forward = nil
+					window:perform_action(wezterm.action.CopyMode("ClearPattern"), pane)
 					window:perform_action(modal.exit_mode("copy_mode"), pane)
 				end
 			end),
@@ -156,13 +139,9 @@ local key_table = {
 						pane
 					)
 					wezterm.GLOBAL.visual_mode = nil
-				elseif wezterm.GLOBAL.search_mode then
-					local mode_name = wezterm.GLOBAL.search_mode
-					wezterm.GLOBAL.search_mode = false
-					window:perform_action(modal.exit_mode(mode_name), pane)
-					window:perform_action(modal.activate_mode("copy_mode"), pane)
 				else
-					wezterm.GLOBAL.search_mode = false
+					wezterm.GLOBAL.search_forward = nil
+					window:perform_action(wezterm.action.CopyMode("ClearPattern"), pane)
 					window:perform_action(modal.exit_mode("copy_mode"), pane)
 				end
 			end),
@@ -356,7 +335,20 @@ local key_table = {
 			key = "y",
 			action = wezterm.action.Multiple({
 				{ CopyTo = "ClipboardAndPrimarySelection" },
+				wezterm.action.CopyMode("ClearSelectionMode"),
+				wezterm.action.CopyMode("ClearPattern"),
 				modal.exit_mode("copy_mode"),
+			}),
+		},
+		{
+			key = "Y",
+			mods = "SHIFT",
+			action = wezterm.action.Multiple({
+				{ CopyTo = "ClipboardAndPrimarySelection" },
+				wezterm.action.CopyMode("ClearSelectionMode"),
+				wezterm.action.CopyMode("ClearPattern"),
+				modal.exit_mode("copy_mode"),
+				{ PasteFrom = "Clipboard" },
 			}),
 		},
 
@@ -367,13 +359,33 @@ local key_table = {
 			action = activate_search(true),
 		},
 		{
-			key = "/",
-			mods = "SHIFT",
+			key = "?",
+			mods = "NONE",
 			action = activate_search(false),
 		},
-		-- n/N respect search direction (set by which search table is active)
-		{ key = "n", mods = "NONE", action = wezterm.action.CopyMode("NextMatch") },
-		{ key = "N", mods = "SHIFT", action = wezterm.action.CopyMode("PriorMatch") },
+		-- n/N respect search direction stored when / or ? was pressed
+		{
+			key = "n",
+			mods = "NONE",
+			action = wezterm.action_callback(function(window, pane)
+				if wezterm.GLOBAL.search_forward == false then
+					window:perform_action(wezterm.action.CopyMode("PriorMatch"), pane)
+				else
+					window:perform_action(wezterm.action.CopyMode("NextMatch"), pane)
+				end
+			end),
+		},
+		{
+			key = "N",
+			mods = "SHIFT",
+			action = wezterm.action_callback(function(window, pane)
+				if wezterm.GLOBAL.search_forward == false then
+					window:perform_action(wezterm.action.CopyMode("NextMatch"), pane)
+				else
+					window:perform_action(wezterm.action.CopyMode("PriorMatch"), pane)
+				end
+			end),
+		},
 
 		{ key = ",", mods = "NONE", action = wezterm.action.CopyMode("JumpReverse") },
 		{ key = ";", mods = "NONE", action = wezterm.action.CopyMode("JumpAgain") },
@@ -407,7 +419,6 @@ if has_token_motions then
 end
 
 return {
-	get_mode_status_text = get_mode_status_text,
 	get_hint_status_text = get_hint_status_text,
 	bracket_back_table = bracket_back_table,
 	bracket_forward_table = bracket_forward_table,

@@ -74,8 +74,6 @@ local function enable_defaults(url)
 		end
 	end
 	package.path = package.path .. ";" .. plugin.plugin_dir .. "/defaults/?.lua"
-	-- Make this module available as require("modal") inside defaults files
-	package.preload["modal"] = function() return package.loaded[url] end
 end
 
 ---sets the current modal status to the right status
@@ -247,7 +245,7 @@ local function set_default_keys(config)
   })
 end
 
-return {
+local M = {
 	set_right_status = set_right_status,
 	set_window_title = set_window_title,
 	reset_window_title = reset_window_title,
@@ -264,3 +262,9 @@ return {
 	exit_mode = exit_mode,
 	exit_all_modes = exit_all_modes,
 }
+
+-- Make this module available as require("modal") inside defaults files,
+-- which are loaded after enable_defaults() has set up package.path.
+package.preload["modal"] = function() return M end
+
+return M

@@ -1,13 +1,6 @@
 local wezterm = require("wezterm")
 local act = wezterm.action
-local _self_url = "https://github.com/MLFlexer/modal.wezterm"
-for _, p in ipairs(wezterm.plugin.list()) do
-	if string.find(package.path, p.plugin_dir .. "/defaults", 1, true) then
-		_self_url = p.url
-		break
-	end
-end
-local modal = wezterm.plugin.require(_self_url)
+local modal = require("modal")
 
 ---Create status text with hints
 ---@param hint_icons {left_seperator: string, key_hint_seperator: string, mod_seperator: string}

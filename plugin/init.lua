@@ -74,6 +74,8 @@ local function enable_defaults(url)
 		end
 	end
 	package.path = package.path .. ";" .. plugin.plugin_dir .. "/defaults/?.lua"
+	-- Make this module available as require("modal") inside defaults files
+	package.preload["modal"] = function() return package.loaded[url] end
 end
 
 ---sets the current modal status to the right status
